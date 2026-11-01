@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Ocho Pistas is an 8-track, 16-step music sequencer that runs entirely in the browser. It is plain HTML/CSS/vanilla JS (ES modules) with **no dependencies, no build step, no package.json, no linter and no test suite**. It is deployed as a static site on GitHub Pages (`.nojekyll` at the root) at https://malbot042.github.io/ocho-pistas/.
+Ocho Pistas is a step music sequencer (8 tracks by default, up to 16) that runs entirely in the browser. It is plain HTML/CSS/vanilla JS (ES modules) with **no dependencies, no build step, no package.json, no linter and no test suite**. It is deployed as a static site on GitHub Pages (`.nojekyll` at the root) at https://malbot042.github.io/ocho-pistas/.
 
 All UI text, code comments, commit messages and the README are in **Spanish**; keep new strings and comments in Spanish.
 
@@ -28,10 +28,12 @@ Three modules, loaded from `index.html` via `<script type="module" src="js/main.
 
 ### Song model
 
-- Always exactly **8 tracks** (`normalizeSong` rejects anything else) and 4 patterns `A`–`D`; `song.song` is the chain of pattern IDs (max 64) played in *Canción* mode.
-- Each pattern has `lanes[8]`, one per track. A lane's shape depends on the track voice's `kind` in `VOICES`:
-  - `drum` → `{ hits: number[16] }` (velocity 0–127, 0 = off)
+- **1–`MAX_TRACKS` (16) tracks** (8 in `newSong`); tracks can be duplicated/deleted, which splices the matching lane in every pattern. The engine pre-creates 16 channels and indexes them by track position, so any reorder must call `changed({ mix: true })`.
+- Patterns are a subset of `PATTERN_IDS` (`A`–`P`, at least one); always iterate them with `patternIds(song)`. `song.song` is the chain of pattern IDs (max 64) played in *Canción* mode.
+- Each pattern has `beats` (one of `METERS`: 2, 3, 4, 6, 8) and `lanes[]`, one per track. Its length is `stepsOf(pat)` = `beats * 4` sixteenth-note steps; there is no global step count. `fitLane(track, lane, steps)` coerces a lane to the right shape/length (used by `normalizeSong`, paste and meter changes). A lane's shape depends on the track voice's `kind` in `VOICES`:
+  - `drum` → `{ hits: number[steps] }` (velocity 0–127, 0 = off)
   - `synth` → `{ notes: [{ m, s, l, v }] }` (MIDI note, start step, length in steps, velocity)
+- `track.trans` (−3..3 octaves) transposes at playback; notes store the *written* pitch. `track.oct` is only the visible piano-roll range. The note editor and grid labels show sounding pitch (written + `trans * 12`), see `shift()` in main.js.
 - The voice selector only offers voices of the same kind, so lane shapes stay consistent; paste re-coerces lanes in case they don't match.
 - The JSON file format (`format: "ocho-pistas"`, `version: 1`) is documented in `README.md`. **`normalizeSong` is the single gate** for both imported files and the localStorage copy: it clamps every field and fills defaults. When adding a field to the model, update `TRACK_DEFS`/`newSong`, `normalizeSong`, and the README format section together. Breaking changes should bump `FORMAT_VERSION` and the `STORAGE_KEY` (`ochopistas.song.v1`).
 

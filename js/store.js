@@ -1,7 +1,12 @@
 // Modelo de la canción, guardado en el navegador e importar/exportar JSON.
 
-export const STEPS = 16;
-export const PATTERN_IDS = ['A', 'B', 'C', 'D'];
+export const MAX_TRACKS = 16;
+// Identificadores posibles; la canción sólo tiene algunos (al menos uno)
+export const PATTERN_IDS = 'ABCDEFGHIJKLMNOP'.split('');
+// Compases disponibles: negras por compás (cada negra son 4 pasos de semicorchea)
+export const METERS = [2, 3, 4, 6, 8];
+export const stepsOf = (pat) => pat.beats * 4;
+export const patternIds = (song) => PATTERN_IDS.filter((id) => song.patterns[id]);
 export const FORMAT = 'ocho-pistas';
 export const FORMAT_VERSION = 1;
 
@@ -20,7 +25,15 @@ export const VOICES = {
   pad:     { label: 'Pad cálido',       kind: 'synth', lo: 48, defaultNote: 60 },
 };
 
-export const PATTERN_COLORS = { A: '#8b7cff', B: '#38bdf8', C: '#f472b6', D: '#a3e635' };
+export const PATTERN_COLORS = {
+  A: '#8b7cff', B: '#38bdf8', C: '#f472b6', D: '#a3e635', E: '#fb923c', F: '#facc15', G: '#2dd4bf', H: '#c084fc',
+  I: '#f87171', J: '#4ade80', K: '#60a5fa', L: '#e879f9', M: '#fbbf24', N: '#22d3ee', O: '#fb7185', P: '#94a3b8',
+};
+
+export const TRACK_COLORS = [
+  '#fb923c', '#facc15', '#a3e635', '#2dd4bf', '#38bdf8', '#8b7cff', '#f472b6', '#c084fc',
+  '#f87171', '#fbbf24', '#4ade80', '#22d3ee', '#818cf8', '#e879f9', '#fb7185', '#94a3b8',
+];
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 export const noteName = (m) => NOTE_NAMES[m % 12] + (Math.floor(m / 12) - 1);
@@ -39,18 +52,40 @@ const TRACK_DEFS = [
   { name: 'Pad',     voice: 'pad',   color: '#c084fc', vol: 45, pan: 25,  rev: 60, oct: 3 },
 ];
 
-function emptyLane(track) {
-  return isDrum(track) ? { hits: new Array(STEPS).fill(0) } : { notes: [] };
+const clamp = (v, lo, hi, d) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d;
+};
+
+// Devuelve un carril con la forma que pide la pista y la longitud del patrón.
+// Descarta lo que quede fuera y limita cada valor; sirve para importar, pegar y cambiar de compás.
+export function fitLane(track, lane, steps) {
+  if (isDrum(track)) {
+    const h = Array.isArray(lane?.hits) ? lane.hits : [];
+    return { hits: Array.from({ length: steps }, (_, s) => Math.round(clamp(h[s], 0, 127, 0))) };
+  }
+  const notes = Array.isArray(lane?.notes) ? lane.notes : [];
+  return {
+    notes: notes.filter((n) => Number(n?.s) < steps).slice(0, 256).map((n) => {
+      const s = Math.round(clamp(n?.s, 0, steps - 1, 0));
+      return {
+        m: Math.round(clamp(n?.m, 0, 127, 60)),
+        s,
+        l: Math.round(clamp(n?.l, 1, steps - s, 1)),
+        v: Math.round(clamp(n?.v, 1, 127, 100)),
+      };
+    }),
+  };
 }
 
-function emptyPattern(tracks) {
-  return { lanes: tracks.map(emptyLane) };
+export function emptyPattern(tracks, beats = 4) {
+  return { beats, lanes: tracks.map((t) => fitLane(t, null, beats * 4)) };
 }
 
 export function newSong(name = 'Canción nueva') {
-  const tracks = TRACK_DEFS.map((d) => ({ ...d, mute: false, solo: false, oct: d.oct ?? 3 }));
+  const tracks = TRACK_DEFS.map((d) => ({ ...d, mute: false, solo: false, oct: d.oct ?? 3, trans: 0 }));
   const patterns = {};
-  PATTERN_IDS.forEach((id) => { patterns[id] = emptyPattern(tracks); });
+  PATTERN_IDS.slice(0, 4).forEach((id) => { patterns[id] = emptyPattern(tracks); });
   return {
     format: FORMAT, version: FORMAT_VERSION,
     name, bpm: 120, swing: 10, masterVol: 85,
@@ -60,7 +95,7 @@ export function newSong(name = 'Canción nueva') {
 }
 
 const hits = (list, vel = 100) => {
-  const a = new Array(STEPS).fill(0);
+  const a = new Array(16).fill(0);
   list.forEach((s) => { a[s] = vel; });
   return a;
 };
@@ -104,19 +139,17 @@ export function demoSong() {
 }
 
 // ===== Validación (para JSON importados) =====
-const clamp = (v, lo, hi, d) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d;
-};
 const cleanColor = (c, d) => (typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c) ? c : d);
 
 export function normalizeSong(raw) {
   if (!raw || typeof raw !== 'object') throw new Error('El archivo no contiene una canción.');
   if (raw.format && raw.format !== FORMAT) throw new Error('El archivo no es una canción de Ocho Pistas.');
-  if (!Array.isArray(raw.tracks) || raw.tracks.length !== 8) throw new Error('La canción debe tener 8 pistas.');
+  if (!Array.isArray(raw.tracks) || raw.tracks.length < 1 || raw.tracks.length > MAX_TRACKS) {
+    throw new Error(`La canción debe tener entre 1 y ${MAX_TRACKS} pistas.`);
+  }
   const base = newSong();
   const tracks = raw.tracks.map((t, i) => {
-    const d = base.tracks[i];
+    const d = base.tracks[i] ?? { ...base.tracks[i % 8], color: TRACK_COLORS[i] };
     const voice = VOICES[t?.voice] ? t.voice : d.voice;
     return {
       name: String(t?.name ?? d.name).slice(0, 30) || d.name,
@@ -126,33 +159,21 @@ export function normalizeSong(raw) {
       pan: clamp(t?.pan, -50, 50, d.pan),
       rev: clamp(t?.rev, 0, 100, d.rev),
       oct: Math.round(clamp(t?.oct, 0, 7, d.oct)),
+      trans: Math.round(clamp(t?.trans, -3, 3, 0)),
       mute: !!t?.mute,
       solo: !!t?.solo,
     };
   });
   const patterns = {};
   PATTERN_IDS.forEach((pid) => {
-    const lanes = raw.patterns?.[pid]?.lanes;
-    patterns[pid] = {
-      lanes: tracks.map((t, i) => {
-        const lane = Array.isArray(lanes) ? lanes[i] : null;
-        if (isDrum(t)) {
-          const h = Array.isArray(lane?.hits) ? lane.hits : [];
-          return { hits: Array.from({ length: STEPS }, (_, s) => Math.round(clamp(h[s], 0, 127, 0))) };
-        }
-        const notes = Array.isArray(lane?.notes) ? lane.notes : [];
-        return {
-          notes: notes.slice(0, 256).map((n) => ({
-            m: Math.round(clamp(n?.m, 0, 127, 60)),
-            s: Math.round(clamp(n?.s, 0, STEPS - 1, 0)),
-            l: Math.round(clamp(n?.l, 1, STEPS, 1)),
-            v: Math.round(clamp(n?.v, 1, 127, 100)),
-          })),
-        };
-      }),
-    };
+    const p = raw.patterns?.[pid];
+    if (!p || typeof p !== 'object') return;
+    const beats = METERS.includes(p.beats) ? p.beats : 4;
+    const lanes = Array.isArray(p.lanes) ? p.lanes : [];
+    patterns[pid] = { beats, lanes: tracks.map((t, i) => fitLane(t, lanes[i], beats * 4)) };
   });
-  const song = Array.isArray(raw.song) ? raw.song.filter((p) => PATTERN_IDS.includes(p)).slice(0, 64) : [];
+  if (!Object.keys(patterns).length) patterns.A = emptyPattern(tracks);
+  const song = Array.isArray(raw.song) ? raw.song.filter((p) => patterns[p]).slice(0, 64) : [];
   return {
     format: FORMAT, version: FORMAT_VERSION,
     name: String(raw.name ?? 'Canción').slice(0, 60) || 'Canción',
@@ -160,7 +181,7 @@ export function normalizeSong(raw) {
     swing: Math.round(clamp(raw.swing, 0, 60, 0)),
     masterVol: clamp(raw.masterVol, 0, 100, 85),
     tracks, patterns,
-    song: song.length ? song : ['A'],
+    song: song.length ? song : [Object.keys(patterns)[0]],
   };
 }
 

@@ -1,5 +1,5 @@
 // Motor de audio: instrumentos sintetizados con Web Audio y un programador con anticipación.
-import { STEPS, isDrum } from './store.js';
+import { MAX_TRACKS, isDrum, stepsOf } from './store.js';
 
 const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
@@ -39,7 +39,7 @@ export class Engine {
     this.reverb.connect(this.reverbOut).connect(this.master);
 
     this.noise = this.makeNoise();
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < MAX_TRACKS; i++) {
       const gain = ctx.createGain();
       const pan = ctx.createStereoPanner();
       const send = ctx.createGain();
@@ -85,6 +85,8 @@ export class Engine {
       ch.pan.pan.setTargetAtTime(tr.pan / 50, t, 0.02);
       ch.send.gain.setTargetAtTime((tr.rev / 100) * 0.8, t, 0.02);
     });
+    // Canales sin pista (por ejemplo, tras eliminar una)
+    this.channels.slice(song.tracks.length).forEach((ch) => ch.gain.gain.setTargetAtTime(0, t, 0.02));
     this.master.gain.setTargetAtTime(Math.pow(song.masterVol / 100, 2) * 1.1, t, 0.02);
   }
 
@@ -214,7 +216,8 @@ export class Engine {
     this.applyMix(song);
     const tr = song.tracks[trackIdx];
     const dur = 60 / song.bpm / 4 * 2;
-    this.play(tr.voice, trackIdx, this.ctx.currentTime + 0.01, midi ?? 60, dur, 100);
+    const m = isDrum(tr) ? 60 : (midi ?? 60) + tr.trans * 12;
+    this.play(tr.voice, trackIdx, this.ctx.currentTime + 0.01, m, dur, 100);
   }
 
   // ===== Transporte =====
@@ -268,15 +271,17 @@ export class Engine {
           const vel = lane.hits[this.step];
           if (vel > 0) this.play(tr.voice, i, t, 60, stepDur, vel);
         } else {
+          const shift = tr.trans * 12;
           lane.notes.forEach((n) => {
-            if (n.s === this.step) this.play(tr.voice, i, t, n.m, n.l * stepDur * 0.95, n.v);
+            if (n.s === this.step) this.play(tr.voice, i, t, n.m + shift, n.l * stepDur * 0.95, n.v);
           });
         }
       });
       this.uiQueue.push({ time: t, step: this.step, pid, chainIndex: this.chainIndex });
       this.nextTime += stepDur;
       this.step++;
-      if (this.step >= STEPS) {
+      // Cada patrón tiene su propio compás; >= cubre el cambio a uno más corto a mitad de compás
+      if (this.step >= stepsOf(pat)) {
         this.step = 0;
         if (this.getMode() === 'song') this.chainIndex = (this.chainIndex + 1) % song.song.length;
       }

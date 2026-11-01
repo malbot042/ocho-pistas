@@ -1,5 +1,6 @@
 import {
-  STEPS, PATTERN_IDS, PATTERN_COLORS, VOICES, isDrum, isBlack, noteName,
+  MAX_TRACKS, PATTERN_IDS, PATTERN_COLORS, TRACK_COLORS, METERS, VOICES, isDrum, isBlack, noteName,
+  stepsOf, patternIds, fitLane, emptyPattern,
   newSong, demoSong, loadLocal, saveLocal, downloadSong, readSongFile,
 } from './store.js';
 import { Engine } from './audio.js';
@@ -8,8 +9,8 @@ import { Engine } from './audio.js';
 let song = loadLocal() || demoSong();
 const ui = {
   view: 'seq',
-  pattern: 'A',
-  sel: 4,
+  pattern: patternIds(song)[0],
+  sel: Math.min(4, song.tracks.length - 1),
   mode: 'pattern',
   noteLen: 2,
   playStep: -1,
@@ -25,6 +26,10 @@ const app = $('#app');
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const lane = (t, pid = ui.pattern) => song.patterns[pid].lanes[t];
 const baseNote = (tr) => (tr.oct + 1) * 12;
+const steps = (pid = ui.pattern) => stepsOf(song.patterns[pid]);
+// Semitonos de transposición: las notas se guardan escritas y el editor las muestra como suenan
+const shift = (tr) => (isDrum(tr) ? 0 : tr.trans * 12);
+const transText = (tr) => (tr.trans ? `${tr.trans > 0 ? '+' : '−'}${Math.abs(tr.trans)} oct` : 'sin transponer');
 const dbText = (v) => (v <= 0 ? '−∞ dB' : `${(40 * Math.log10(v / 100)).toFixed(1).replace('.', ',').replace('-', '−')} dB`);
 
 // ===== Guardado =====
@@ -51,8 +56,8 @@ function toast(msg) {
 function loadSong(s, msg) {
   if (engine.playing) stopPlay();
   song = s;
-  ui.pattern = 'A';
-  ui.sel = 4;
+  ui.pattern = patternIds(song)[0];
+  ui.sel = Math.min(4, song.tracks.length - 1);
   renderAll();
   engine.applyMix(song);
   changed({ render: false });
@@ -84,12 +89,12 @@ function renderView() {
 
 // ===== Vista: secuenciador =====
 function patternPills() {
-  return PATTERN_IDS.map((id) => `<button class="pill" data-act="pattern" data-id="${id}" aria-pressed="${ui.pattern === id}"><span class="dot" style="background:${PATTERN_COLORS[id]}"></span>${id}</button>`).join('');
+  return patternIds(song).map((id) => `<button class="pill" data-act="pattern" data-id="${id}" aria-pressed="${ui.pattern === id}"><span class="dot" style="background:${PATTERN_COLORS[id]}"></span>${id}</button>`).join('');
 }
 
 function stepHeads() {
   let h = '';
-  for (let s = 0; s < STEPS; s++) h += `<div class="step-head mono ${s % 4 === 0 ? 'beat' : ''}" data-col="${s}">${s + 1}</div>`;
+  for (let s = 0; s < steps(); s++) h += `<div class="step-head mono ${s % 4 === 0 ? 'beat' : ''}" data-col="${s}">${s + 1}</div>`;
   return h;
 }
 
@@ -99,7 +104,7 @@ function viewSeq() {
     const off = tr.mute || (anySolo && !tr.solo);
     const ln = lane(t);
     let cells = '';
-    for (let s = 0; s < STEPS; s++) {
+    for (let s = 0; s < steps(); s++) {
       const alt = Math.floor(s / 4) % 2 === 1 ? ' alt' : '';
       if (isDrum(tr)) {
         const v = ln.hits[s];
@@ -109,7 +114,8 @@ function viewSeq() {
         const starts = ln.notes.filter((n) => n.s === s);
         const covered = !starts.length && ln.notes.some((n) => s > n.s && s < n.s + n.l);
         const low = starts.length ? Math.min(...starts.map((n) => n.m)) : 0;
-        const label = starts.length > 1 ? `${noteName(low)}+${starts.length - 1}` : starts.length ? noteName(low) : '';
+        const shown = low + shift(tr);
+        const label = starts.length > 1 ? `${noteName(shown)}+${starts.length - 1}` : starts.length ? noteName(shown) : '';
         const style = starts.length ? ` style="background:${tr.color}"` : covered ? ` style="background:${tr.color};opacity:.45"` : '';
         cells += `<button class="step${alt}${starts.length || covered ? ' on' : ''}" data-act="step" data-t="${t}" data-s="${s}" data-col="${s}"${style} aria-label="${esc(tr.name)} paso ${s + 1}${label ? ' ' + label : ''}">${label}</button>`;
       }
@@ -118,7 +124,7 @@ function viewSeq() {
       <div class="thead${ui.sel === t ? ' selected' : ''}">
         <button class="tselect" data-act="select" data-t="${t}">
           <span class="tcolor" style="background:${tr.color}"></span>
-          <span style="min-width:0"><span class="tname">${esc(tr.name)}</span><span class="tinst">${VOICES[tr.voice].label}</span></span>
+          <span style="min-width:0"><span class="tname">${esc(tr.name)}</span><span class="tinst">${VOICES[tr.voice].label}${tr.trans && !isDrum(tr) ? ` · ${transText(tr)}` : ''}</span></span>
         </button>
         <button class="ms m" data-act="mute" data-t="${t}" aria-pressed="${tr.mute}" aria-label="Silenciar ${esc(tr.name)}">M</button>
         <button class="ms s" data-act="solo" data-t="${t}" aria-pressed="${tr.solo}" aria-label="Solo ${esc(tr.name)}">S</button>
@@ -131,26 +137,35 @@ function viewSeq() {
       <button class="chain-chip" data-act="chainPick" data-i="${i}" data-chain="${i}" style="background:${PATTERN_COLORS[pid]}" aria-label="Posición ${i + 1}: patrón ${pid}">${pid}</button>
       <span class="chain-bar mono">${i + 1}</span></div>`).join('');
 
+  const ids = patternIds(song);
+  const full = ids.length >= PATTERN_IDS.length;
+  const meters = METERS.map((b) => `<option value="${b}" ${song.patterns[ui.pattern].beats === b ? 'selected' : ''}>${b}/4</option>`).join('');
   return `<section class="main-col">
     <div class="toolbar">
       <h1>Patrón ${ui.pattern}</h1>
       ${patternPills()}
+      <button class="pill" data-act="patternNew" ${full ? 'disabled' : ''} aria-label="Patrón nuevo vacío" title="Patrón nuevo vacío">+</button>
       <div class="spacer"></div>
+      <label class="small muted inline-field">Compás<select data-act="meter" aria-label="Compás del patrón ${ui.pattern}">${meters}</select></label>
+    </div>
+    <div class="toolbar">
+      <button class="pill" data-act="patternDup" ${full ? 'disabled' : ''}>Duplicar patrón</button>
       <button class="pill" data-act="copy">Copiar</button>
       <button class="pill" data-act="paste" ${ui.clipboard ? '' : 'disabled'}>Pegar</button>
       <button class="pill" data-act="clearPattern">Limpiar</button>
+      <button class="pill" data-act="patternDel" ${ids.length > 1 ? '' : 'disabled'}>Eliminar patrón</button>
     </div>
-    <div class="card grid scroll-x"><div class="grid-inner">
+    <div class="card grid scroll-x"><div class="grid-inner" style="--steps:${steps()}">
       <div class="grow"><div class="small muted" style="font-weight:600">PISTAS</div><div class="steps">${stepHeads()}</div></div>
       ${rows}
     </div></div>
     <div class="card chain">
       <span style="font-weight:600">Canción</span>
-      <span class="small muted" style="margin-right:6px">orden de patrones · ${song.song.length} × 1 compás</span>
+      <span class="small muted" style="margin-right:6px">orden de patrones · ${song.song.length} ${song.song.length === 1 ? 'patrón' : 'patrones'}</span>
       ${chain}
       <span class="spacer"></span>
       <span class="small muted">Añadir</span>
-      ${PATTERN_IDS.map((id) => `<button class="pill" data-act="chainAdd" data-id="${id}" aria-label="Añadir patrón ${id}">${id}</button>`).join('')}
+      ${patternIds(song).map((id) => `<button class="pill" data-act="chainAdd" data-id="${id}" aria-label="Añadir patrón ${id}">${id}</button>`).join('')}
       <button class="pill" data-act="chainPop" ${song.song.length > 1 ? '' : 'disabled'} aria-label="Quitar el último">−</button>
     </div>
   </section>
@@ -172,6 +187,7 @@ function inspector() {
     <label class="field">Volumen<input type="range" min="0" max="100" value="${tr.vol}" data-act="vol" data-t="${t}"></label>
     <label class="field">Panorama<input type="range" min="-50" max="50" value="${tr.pan}" data-act="pan" data-t="${t}"></label>
     <label class="field">Reverb<input type="range" min="0" max="100" value="${tr.rev}" data-act="rev" data-t="${t}"></label>
+    ${drum ? '' : transControl(tr)}
     <div class="divider">
       <div class="kv"><span class="muted">${drum ? 'Golpes' : 'Notas'} en el patrón ${ui.pattern}</span><b class="mono">${count}</b></div>
     </div>
@@ -179,7 +195,22 @@ function inspector() {
       ? '<p class="small muted" style="margin:0">Pista de percusión: cada paso es un golpe. Clic con Mayús para alternar entre golpe suave y fuerte.</p>'
       : `<button class="btn-accent" data-act="goNotes">Editar notas de ${esc(tr.name)}</button>`}
     <button class="pill" data-act="clearTrack">Vaciar esta pista en el patrón</button>
+    <div class="divider">
+      <button class="pill" data-act="trackDup" ${song.tracks.length < MAX_TRACKS ? '' : 'disabled'}>Duplicar pista</button>
+      <button class="pill" data-act="trackDel" ${song.tracks.length > 1 ? '' : 'disabled'}>Eliminar pista</button>
+      <p class="small muted" style="margin:0">Duplicar crea una pista debajo con el mismo instrumento y las mismas notas en todos los patrones, una octava más arriba. Luego puedes cambiarle la octava o las notas para que haga otra voz.</p>
+    </div>
   </aside>`;
+}
+
+// Transposición por octavas: cambia lo que suena, no las notas escritas
+function transControl(tr) {
+  return `<div class="field">Transposición
+    <div class="toolbar">
+      <button class="pill" data-act="trans" data-d="-1" ${tr.trans > -3 ? '' : 'disabled'} aria-label="Transponer una octava abajo">−</button>
+      <span class="mono" style="min-width:110px;text-align:center;color:var(--text)">${transText(tr)}</span>
+      <button class="pill" data-act="trans" data-d="1" ${tr.trans < 3 ? '' : 'disabled'} aria-label="Transponer una octava arriba">+</button>
+    </div></div>`;
 }
 
 // ===== Vista: notas =====
@@ -188,14 +219,14 @@ function viewNotes() {
   if (ui.sel < 0) {
     return '<section class="main-col"><div class="card empty-state">No hay pistas melódicas. Cambia el instrumento de alguna pista en el Secuenciador.</div></section>';
   }
-  const t = ui.sel, tr = song.tracks[t], ln = lane(t), base = baseNote(tr);
+  const t = ui.sel, tr = song.tracks[t], ln = lane(t), base = baseNote(tr), sh = shift(tr);
   const tabs = song.tracks.map((x, i) => (isDrum(x) ? '' : `<button class="pill" data-act="select" data-t="${i}" aria-pressed="${i === t}"><span class="dot" style="background:${x.color}"></span>${esc(x.name)}</button>`)).join('');
   let rows = '';
   for (let m = base + 23; m >= base; m--) {
     const black = isBlack(m);
     let cells = '';
-    for (let s = 0; s < STEPS; s++) {
-      const hit = ln.notes.find((n) => n.m === m && s >= n.s && s < n.s + n.l);
+    for (let s = 0; s < steps(); s++) {
+      const hit = ln.notes.find((n) => n.m + sh === m && s >= n.s && s < n.s + n.l);
       const start = hit && hit.s === s;
       const cls = black ? ' black' : (Math.floor(s / 4) % 2 ? ' alt' : '');
       const style = hit ? ` style="background:${tr.color}"` : '';
@@ -204,7 +235,7 @@ function viewNotes() {
     rows += `<div class="rrow"><button class="key${black ? ' black' : ''}" data-act="key" data-m="${m}" aria-label="Escuchar ${noteName(m)}">${noteName(m)}</button><div class="rsteps">${cells}</div></div>`;
   }
   let vel = '';
-  for (let s = 0; s < STEPS; s++) {
+  for (let s = 0; s < steps(); s++) {
     const v = Math.max(0, ...ln.notes.filter((n) => n.s === s).map((n) => n.v));
     vel += `<button class="vel-bar" data-act="vel" data-s="${s}" ${v ? '' : 'disabled'} style="height:${v ? Math.round(v / 127 * 100) : 5}%;${v ? `background:${tr.color}` : ''}" aria-label="Intensidad paso ${s + 1}: ${v || 'sin nota'}"></button>`;
   }
@@ -217,16 +248,16 @@ function viewNotes() {
     <div class="toolbar">
       <span class="small muted">Patrón</span>${patternPills()}
       <span class="spacer"></span>
-      <span class="small muted">Octava</span>
+      <span class="small muted">Teclado visible</span>
       <button class="pill" data-act="oct" data-d="-1" aria-label="Bajar octava">−</button>
       <span class="mono" style="min-width:52px;text-align:center">${noteName(base)}</span>
       <button class="pill" data-act="oct" data-d="1" aria-label="Subir octava">+</button>
     </div>
-    <div class="card roll scroll-x"><div class="roll-inner">
+    <div class="card roll scroll-x"><div class="roll-inner" style="--steps:${steps()}">
       <div class="rrow"><div></div><div class="rsteps">${stepHeads()}</div></div>
       ${rows}
     </div></div>
-    <div class="card vel scroll-x"><div class="vel-inner">
+    <div class="card vel scroll-x"><div class="vel-inner" style="--steps:${steps()}">
       <div class="small muted" style="text-align:right;font-weight:600;padding-right:8px">FUERZA</div>
       <div class="vel-bars">${vel}</div>
     </div></div>
@@ -235,6 +266,7 @@ function viewNotes() {
     <div class="track-title"><span class="bar" style="background:${tr.color}"></span>
       <div><div class="small muted">Pista ${t + 1} · ${VOICES[tr.voice].label}</div><div class="big">${esc(tr.name)}</div></div></div>
     <div class="field">Duración de las notas nuevas (pasos)<div class="toolbar">${lens}</div></div>
+    ${transControl(tr)}
     <div class="divider">
       <div class="kv"><span class="muted">Notas en el patrón ${ui.pattern}</span><b class="mono">${ln.notes.length}</b></div>
     </div>
@@ -247,7 +279,7 @@ function viewNotes() {
 function viewMix() {
   const strips = song.tracks.map((tr, t) => `<div class="card strip">
       <div class="strip-color" style="background:${tr.color}"></div>
-      <div class="strip-name"><b>${esc(tr.name)}</b><span>${VOICES[tr.voice].label}</span></div>
+      <div class="strip-name"><b>${esc(tr.name)}</b><span>${VOICES[tr.voice].label}</span>${tr.trans && !isDrum(tr) ? `<span>${transText(tr)}</span>` : ''}</div>
       <div class="knob-row"><div class="lbl"><span>I</span><span>PAN</span><span>D</span></div>
         <input type="range" min="-50" max="50" value="${tr.pan}" data-act="pan" data-t="${t}" aria-label="Panorama ${esc(tr.name)}"></div>
       <div class="knob-row"><div class="lbl"><span>REVERB</span><span class="mono" data-revtext="${t}">${tr.rev}%</span></div>
@@ -349,24 +381,93 @@ function toggleStep(t, s, shift) {
     if (covering.length) {
       ln.notes = ln.notes.filter((n) => !covering.includes(n));
     } else {
-      const m = lastNote[t] ?? baseNote(tr) + 12;
-      ln.notes.push({ m, s, l: Math.min(ui.noteLen, STEPS - s), v: 100 });
+      const m = lastNote[t] ?? baseNote(tr) + 12 - shift(tr);
+      ln.notes.push({ m, s, l: Math.min(ui.noteLen, steps() - s), v: 100 });
       engine.preview(song, t, m);
     }
   }
   changed();
 }
 
-function toggleCell(m, s) {
+function toggleCell(shown, s) {
   const t = ui.sel, ln = lane(t);
+  const m = shown - shift(song.tracks[t]);
   const hit = ln.notes.find((n) => n.m === m && s >= n.s && s < n.s + n.l);
   if (hit) {
     ln.notes = ln.notes.filter((n) => n !== hit);
   } else {
-    ln.notes.push({ m, s, l: Math.min(ui.noteLen, STEPS - s), v: 100 });
+    if (m < 0 || m > 127) return;
+    ln.notes.push({ m, s, l: Math.min(ui.noteLen, steps() - s), v: 100 });
     lastNote[t] = m;
     engine.preview(song, t, m);
   }
+  changed();
+}
+
+// ===== Pistas y patrones =====
+const clone = (o) => JSON.parse(JSON.stringify(o));
+
+function duplicateTrack(t) {
+  if (song.tracks.length >= MAX_TRACKS) return;
+  const src = song.tracks[t];
+  const used = new Set(song.tracks.map((tr) => tr.color));
+  const copy = {
+    ...src,
+    name: `${src.name} 2`.slice(0, 30),
+    color: TRACK_COLORS.find((c) => !used.has(c)) ?? src.color,
+    trans: src.trans < 3 ? src.trans + 1 : src.trans - 1,
+    oct: src.trans < 3 ? Math.min(7, src.oct + 1) : Math.max(0, src.oct - 1),
+    solo: false,
+  };
+  song.tracks.splice(t + 1, 0, copy);
+  Object.values(song.patterns).forEach((p) => p.lanes.splice(t + 1, 0, clone(p.lanes[t])));
+  ui.sel = t + 1;
+  toast(`Pista duplicada: ${copy.name}`);
+  changed({ mix: true });
+}
+
+function deleteTrack(t) {
+  if (song.tracks.length <= 1) return;
+  if (!confirm(`¿Eliminar la pista «${song.tracks[t].name}» y sus notas en todos los patrones?`)) return;
+  song.tracks.splice(t, 1);
+  Object.values(song.patterns).forEach((p) => p.lanes.splice(t, 1));
+  ui.sel = Math.min(t, song.tracks.length - 1);
+  Object.keys(lastNote).forEach((k) => delete lastNote[k]);
+  changed({ mix: true });
+}
+
+function addPattern(from) {
+  const id = PATTERN_IDS.find((x) => !song.patterns[x]);
+  if (!id) return;
+  song.patterns[id] = from ? clone(from) : emptyPattern(song.tracks, song.patterns[ui.pattern].beats);
+  ui.pattern = id;
+  toast(from ? `Patrón duplicado como ${id}` : `Patrón ${id} creado`);
+  changed();
+}
+
+function deletePattern(id) {
+  const ids = patternIds(song);
+  if (ids.length <= 1) return;
+  if (!confirm(`¿Eliminar el patrón ${id}? También se quitará de la canción.`)) return;
+  delete song.patterns[id];
+  const left = patternIds(song);
+  song.song = song.song.filter((p) => p !== id);
+  if (!song.song.length) song.song = [left[0]];
+  ui.pattern = left[Math.max(0, ids.indexOf(id) - 1)];
+  changed();
+}
+
+function setMeter(beats) {
+  const pat = song.patterns[ui.pattern];
+  const n = beats * 4;
+  const lost = pat.lanes.reduce((acc, l) => acc + (l.hits
+    ? l.hits.slice(n).filter(Boolean).length
+    : l.notes.filter((x) => x.s >= n).length), 0);
+  if (lost && !confirm(`Al pasar a ${beats}/4 se borrarán ${lost} ${lost === 1 ? 'golpe o nota' : 'golpes o notas'} que quedan fuera del compás. ¿Seguir?`)) {
+    renderView(); return;
+  }
+  pat.beats = beats;
+  pat.lanes = pat.lanes.map((l, i) => fitLane(song.tracks[i], l, n));
   changed();
 }
 
@@ -396,22 +497,37 @@ function handleClick(e) {
       toast(`Patrón ${ui.pattern} copiado`); renderView(); break;
     case 'paste':
       if (!ui.clipboard) break;
-      song.patterns[ui.pattern] = JSON.parse(JSON.stringify(ui.clipboard));
-      // Ajusta los carriles si algún instrumento cambió de tipo
-      song.patterns[ui.pattern].lanes = song.patterns[ui.pattern].lanes.map((l, i) => (
-        isDrum(song.tracks[i]) ? (l.hits ? l : { hits: new Array(STEPS).fill(0) }) : (l.notes ? l : { notes: [] })));
+      // Ajusta los carriles si algún instrumento cambió de tipo o se añadieron/quitaron pistas
+      song.patterns[ui.pattern] = {
+        beats: ui.clipboard.beats,
+        lanes: song.tracks.map((tr, i) => fitLane(tr, ui.clipboard.lanes[i], ui.clipboard.beats * 4)),
+      };
       toast(`Pegado en el patrón ${ui.pattern}`); changed(); break;
     case 'chainAdd': if (song.song.length < 64) { song.song.push(el.dataset.id); changed(); } break;
     case 'chainPop': if (song.song.length > 1) { song.song.pop(); changed(); } break;
     case 'chainPick': ui.pattern = song.song[Number(el.dataset.i)]; renderView(); break;
     case 'cell': toggleCell(Number(el.dataset.m), Number(el.dataset.s)); break;
-    case 'key': engine.preview(song, ui.sel, Number(el.dataset.m)); break;
+    case 'key': engine.preview(song, ui.sel, Number(el.dataset.m) - shift(song.tracks[ui.sel])); break;
     case 'len': ui.noteLen = Number(el.dataset.l); renderView(); break;
     case 'oct': {
       const tr = song.tracks[ui.sel];
       tr.oct = Math.max(0, Math.min(7, tr.oct + Number(el.dataset.d)));
       changed(); break;
     }
+    case 'trans': {
+      const tr = song.tracks[ui.sel];
+      tr.trans = Math.max(-3, Math.min(3, tr.trans + Number(el.dataset.d)));
+      // El teclado visible acompaña a la transposición para que las notas sigan a la vista
+      tr.oct = Math.max(0, Math.min(7, tr.oct + Number(el.dataset.d)));
+      changed();
+      engine.preview(song, ui.sel, lastNote[ui.sel] ?? baseNote(tr) + 12);
+      break;
+    }
+    case 'trackDup': duplicateTrack(ui.sel); break;
+    case 'trackDel': deleteTrack(ui.sel); break;
+    case 'patternNew': addPattern(null); break;
+    case 'patternDup': addPattern(song.patterns[ui.pattern]); break;
+    case 'patternDel': deletePattern(ui.pattern); break;
     case 'vel': {
       const s = Number(el.dataset.s);
       const ns = lane(ui.sel).notes.filter((n) => n.s === s);
@@ -449,11 +565,13 @@ function handleInput(e) {
 function handleChange(e) {
   const el = e.target;
   const act = el.dataset?.act;
-  if (act === 'voice') {
+  if (act === 'meter') {
+    setMeter(Number(el.value));
+  } else if (act === 'voice') {
     const t = Number(el.dataset.t);
     song.tracks[t].voice = el.value;
     changed();
-    engine.preview(song, t, isDrum(song.tracks[t]) ? 60 : baseNote(song.tracks[t]) + 12);
+    engine.preview(song, t, isDrum(song.tracks[t]) ? 60 : baseNote(song.tracks[t]) + 12 - shift(song.tracks[t]));
   } else if (act === 'trackName') {
     if (!song.tracks[Number(el.dataset.t)].name.trim()) song.tracks[Number(el.dataset.t)].name = `Pista ${Number(el.dataset.t) + 1}`;
     changed();
