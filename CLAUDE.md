@@ -20,9 +20,10 @@ There are no automated tests; verify changes by using the app in a browser (soun
 
 ## Architecture
 
-Three modules, loaded from `index.html` via `<script type="module" src="js/main.js">`:
+Four modules, loaded from `index.html` via `<script type="module" src="js/main.js">`:
 
 - **`js/store.js`** — song data model, defaults (`newSong`, `demoSong`), validation (`normalizeSong`), localStorage persistence and JSON import/export. No DOM rendering.
+- **`js/demos.js`** — `DEMOS` list shown under *Archivo → Canciones de ejemplo*. Songs are written in a compact notation (drums `"X... x.o."`, notes `"C4+E4+G4:start:len[:vel]"`, `arp()` for repeated figures) and built by `make()`, which assigns colors, picks the visible octave from the lowest sounding note and passes everything through `normalizeSong`. `make()` `console.warn`s if a drum string or note doesn't fit the pattern's meter.
 - **`js/audio.js`** — `Engine` class: Web Audio graph, synthesized instruments, and the playback scheduler. Reads the song but never mutates it.
 - **`js/main.js`** — owns all mutable state, renders the views, handles events and transport.
 

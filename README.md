@@ -10,6 +10,7 @@ Secuenciador musical de 8 pistas que funciona en el navegador, sin instalar nada
 - **Patrones A–P** (empiezas con 4; crea, duplica o elimina) y una **cadena de canción** para ordenarlos; modo *Patrón* o *Canción*.
 - **Compás por patrón**: 2/4, 3/4, 4/4, 6/4 u 8/4 (4 pasos de semicorchea por negra: 8, 12, 16, 24 o 32 pasos).
 - **Editor de notas por pasos** (sin pentagrama): rejilla de notas con teclado vertical, duración por nota y fuerza.
+- **11 canciones de ejemplo** (Archivo → Canciones de ejemplo) en estilos distintos: pop, vals (3/4), marcha (2/4), hip hop con swing, house, synthwave con octavas duplicadas, balada (6/4), lo-fi (8/4), reggaetón, rock y una con compases mezclados.
 - **Mezclador**: volumen, panorama, reverb, silencio (M), solo (S), vúmetros y máster con limitador.
 - **Modo claro y oscuro** (respeta la preferencia del sistema y recuerda tu elección).
 - Sonidos sintetizados con Web Audio API: no descarga muestras.
@@ -63,6 +64,7 @@ Estructura:
 index.html      interfaz y cabecera
 styles.css      estilos y temas claro/oscuro
 js/store.js     modelo de canción, guardado e importar/exportar JSON
+js/demos.js     canciones de ejemplo
 js/audio.js     instrumentos y programador de Web Audio
 js/main.js      vistas, eventos y transporte
 ```

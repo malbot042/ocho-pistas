@@ -128,11 +128,15 @@ button { cursor: pointer; }
 }
 .menu {
   position: absolute; right: 0; top: 48px; min-width: 250px; z-index: 30;
+  max-height: calc(100vh - 80px); overflow-y: auto;
   background: var(--surface); border: 1px solid var(--border-2); border-radius: 12px; padding: 6px;
   box-shadow: var(--shadow); display: flex; flex-direction: column;
 }
 .menu button { text-align: left; background: none; border: 0; padding: 10px 12px; border-radius: 8px; min-height: 40px; }
 .menu button:hover { background: var(--surface-2); }
+.menu .demo { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; }
+.menu .demo small { color: var(--muted); font-size: 12px; }
+.menu-label { padding: 6px 12px 2px; font-size: 12px; font-weight: 600; color: var(--muted); }
 .menu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 0; width: 100%; }
 
 /* ===== Disposición ===== */

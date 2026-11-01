@@ -3,6 +3,7 @@ import {
   stepsOf, patternIds, fitLane, emptyPattern,
   newSong, demoSong, loadLocal, saveLocal, downloadSong, readSongFile,
 } from './store.js';
+import { DEMOS } from './demos.js';
 import { Engine } from './audio.js';
 
 // ===== Estado =====
@@ -624,6 +625,7 @@ btnMenu.addEventListener('click', (e) => {
   if (!menu.hidden) menu.querySelector('button').focus();
 });
 document.addEventListener('click', (e) => { if (!menu.hidden && !menu.contains(e.target)) closeMenu(); });
+$('#demoList').innerHTML = DEMOS.map((d) => `<button role="menuitem" class="demo" data-action="demo" data-demo="${d.id}"><span>${esc(d.title)}</span><small>${esc(d.desc)}</small></button>`).join('');
 menu.addEventListener('click', (e) => {
   const b = e.target.closest('[data-action]');
   if (!b) return;
@@ -632,7 +634,8 @@ menu.addEventListener('click', (e) => {
   if (a === 'new') {
     if (confirm('¿Empezar una canción nueva? La actual se perderá si no la has descargado.')) loadSong(newSong(), 'Canción nueva creada');
   } else if (a === 'demo') {
-    if (confirm('¿Cargar la canción de ejemplo? La actual se perderá si no la has descargado.')) loadSong(demoSong(), 'Canción de ejemplo cargada');
+    const d = DEMOS.find((x) => x.id === b.dataset.demo);
+    if (d && confirm(`¿Cargar «${d.title}»? La canción actual se perderá si no la has descargado.`)) loadSong(d.make(), `Ejemplo cargado: ${d.title}`);
   } else if (a === 'export') {
     downloadSong(song); toast('Canción descargada como .json');
   } else if (a === 'import') {

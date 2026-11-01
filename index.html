@@ -70,10 +70,12 @@
     <button id="btnMenu" class="btn-primary" aria-haspopup="menu" aria-expanded="false">Archivo</button>
     <div id="fileMenu" class="menu" role="menu" hidden>
       <button role="menuitem" data-action="new">Nueva canción</button>
-      <button role="menuitem" data-action="demo">Cargar canción de ejemplo</button>
       <hr>
       <button role="menuitem" data-action="export">Descargar canción (.json)</button>
       <button role="menuitem" data-action="import">Abrir canción (.json)…</button>
+      <hr>
+      <div class="menu-label" id="demoLabel">Canciones de ejemplo</div>
+      <div id="demoList" role="group" aria-labelledby="demoLabel"></div>
     </div>
     <input id="fileInput" type="file" accept=".json,application/json" hidden>
   </div>
